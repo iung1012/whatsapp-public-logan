@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# WhatsApp session credentials (IMPORTANT: never commit these!)
+auth_info/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Runtime state files (persist across restarts, but not needed in repo)
+summary-cooldown.json
+shabbat_lock_state.json
+shabbat_times_cache.json
+tmp_broadcast.json
+
+# Claude Code agent memory and settings
+.claude/

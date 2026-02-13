@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-02-13T10:04:23.601Z",
+  "summary": {
+    "totalGroups": 6,
+    "totalApproved": 0,
+    "totalRejected": 0,
+    "totalWaitlisted": 0,
+    "totalErrors": 6
+  },
+  "groupResults": [
+    {
+      "groupName": "קבוצת הדיונים",
+      "approved": 0,
+      "rejected": 0,
+      "waitlisted": 0,
+      "errors": [
+        "bot_not_admin"
+      ],
+      "details": {
+        "approvedJids": [],
+        "rejectedJids": [],
+        "waitlistedJids": []
+      }
+    },
+    {
+      "groupName": "וייב קודינג",
+      "approved": 0,
+      "rejected": 0,
+      "waitlisted": 0,
+      "errors": [
+        "bot_not_admin"
+      ],
+      "details": {
+        "approvedJids": [],
+        "rejectedJids": [],
+        "waitlistedJids": []
+      }
+    },
+    {
+      "groupName": "הזדמנויות ומשרות",
+      "approved": 0,
+      "rejected": 0,
+      "waitlisted": 0,
+      "errors": [
+        "bot_not_admin"
+      ],
+      "details": {
+        "approvedJids": [],
+        "rejectedJids": [],
+        "waitlistedJids": []
+      }
+    },
+    {
+      "groupName": "למידת מכונה",
+      "approved": 0,
+      "rejected": 0,
+      "waitlisted": 0,
+      "errors": [
+        "bot_not_admin"
+      ],
+      "details": {
+        "approvedJids": [],
+        "rejectedJids": [],
+        "waitlistedJids": []
+      }
+    },
+    {
+      "groupName": "🧠",
+      "approved": 0,
+      "rejected": 0,
+      "waitlisted": 0,
+      "errors": [
+        "bot_not_admin"
+      ],
+      "details": {
+        "approvedJids": [],
+        "rejectedJids": [],
+        "waitlistedJids": []
+      }
+    },
+    {
+      "groupName": "קבוצה של מתן",
+      "approved": 0,
+      "rejected": 0,
+      "waitlisted": 0,
+      "errors": [
+        "bot_not_admin"
+      ],
+      "details": {
+        "approvedJids": [],
+        "rejectedJids": [],
+        "waitlistedJids": []
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { LOGAN_SYSTEM_PROMPT, LOGAN_FREE_CHAT_PROMPT } from '../prompts/logan';
+import { callOpenAIWithMessages, isOpenAIConfigured, getOpenAIModel } from './openai';
 
 // Groq API (Primary)
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -154,9 +155,23 @@ export async function callGroq(userPrompt: string, useFreeChatPrompt: boolean = 
     { role: 'user', content: userPrompt }
   ];
 
-  // Try Groq first (Primary) - faster and cheaper
+  // Try OpenAI first if configured (highest quality)
+  if (isOpenAIConfigured()) {
+    const openAIModel = getOpenAIModel();
+    console.log(`[LOGAN] Trying primary: OpenAI (${openAIModel})`);
+    const openAIResult = await callOpenAIWithMessages(messages);
+
+    if (openAIResult.success && openAIResult.content) {
+      console.log(`[LOGAN] OpenAI succeeded`);
+      return openAIResult.content;
+    }
+
+    console.log(`[LOGAN] OpenAI failed: ${openAIResult.error}`);
+  }
+
+  // Try Groq second (faster and cheaper)
   if (groqApiKey) {
-    console.log(`[LOGAN] Trying primary: Groq (${GROQ_MODEL_PRIMARY})`);
+    console.log(`[LOGAN] Trying secondary: Groq (${GROQ_MODEL_PRIMARY})`);
     const primaryResult = await callGroqWithModel(groqApiKey, messages, GROQ_MODEL_PRIMARY);
 
     if (primaryResult.success && primaryResult.content) {

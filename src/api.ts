@@ -268,24 +268,31 @@ app.get('/api/health', (_req: Request, res: Response) => {
 app.get('/api/qr', async (req: Request, res: Response) => {
   const qrData = getCurrentQrCode();
   const format = req.query.format as string || 'image'; // 'image' or 'json'
+  const connected = isConnected();
+  const stable = isStable();
+
+  console.log(`[API] QR endpoint called - connected: ${connected}, stable: ${stable}, hasQR: ${!!qrData}`);
 
   if (!qrData) {
-    if (isConnected()) {
+    if (connected) {
       return res.status(200).json({ 
         status: 'connected',
-        message: 'WhatsApp is already connected. No QR code needed.' 
+        message: 'WhatsApp is already connected. No QR code needed.',
+        whatsapp: { connected, stable }
       });
     }
-    return res.status(404).json({ 
+    return res.status(503).json({ 
       status: 'unavailable',
-      message: 'QR code not available yet. Please wait for connection initialization.' 
+      message: 'QR code not available yet. Please wait for connection initialization or check logs.',
+      whatsapp: { connected, stable }
     });
   }
 
   if (format === 'json') {
     return res.json({ 
       status: 'available',
-      qr: qrData 
+      qr: qrData,
+      whatsapp: { connected, stable }
     });
   }
 
@@ -297,11 +304,122 @@ app.get('/api/qr', async (req: Request, res: Response) => {
       margin: 2
     });
     res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.send(qrImage);
   } catch (error) {
-    console.error('Error generating QR code image:', error);
-    res.status(500).json({ error: 'Failed to generate QR code image' });
+    console.error('[API] Error generating QR code image:', error);
+    res.status(500).json({ error: 'Failed to generate QR code image', details: String(error) });
   }
+});
+
+// QR code viewer page (HTML)
+app.get('/qr', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WhatsApp QR Code - Logan Bot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .container {
+      text-align: center;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2rem;
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+    }
+    h1 { margin: 0 0 1rem 0; font-size: 2rem; }
+    #qr-container {
+      background: white;
+      padding: 1rem;
+      border-radius: 10px;
+      margin: 1rem 0;
+      min-height: 400px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #qr-image { max-width: 100%; height: auto; }
+    #status {
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .loading {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-top: 4px solid white;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .error { color: #ff6b6b; }
+    .success { color: #51cf66; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 Logan WhatsApp Bot</h1>
+    <p>Scan the QR code with WhatsApp to connect</p>
+    <div id="qr-container">
+      <div class="loading"></div>
+    </div>
+    <div id="status">Loading...</div>
+  </div>
+  <script>
+    async function loadQR() {
+      try {
+        const response = await fetch('/api/qr?format=json');
+        const data = await response.json();
+        
+        if (data.status === 'available') {
+          document.getElementById('qr-container').innerHTML = 
+            '<img id="qr-image" src="/api/qr" alt="QR Code">';
+          document.getElementById('status').innerHTML = 
+            '<span class="success">✓ QR Code ready - Scan with WhatsApp</span>';
+        } else if (data.status === 'connected') {
+          document.getElementById('qr-container').innerHTML = 
+            '<div style="color: #51cf66; font-size: 3rem;">✓</div>';
+          document.getElementById('status').innerHTML = 
+            '<span class="success">✓ Already connected to WhatsApp</span>';
+        } else {
+          document.getElementById('qr-container').innerHTML = 
+            '<div style="color: #666;">⏳</div>';
+          document.getElementById('status').innerHTML = 
+            '<span>⏳ Waiting for QR code... Refreshing in 3s</span>';
+          setTimeout(loadQR, 3000);
+        }
+      } catch (error) {
+        document.getElementById('qr-container').innerHTML = 
+          '<div style="color: #ff6b6b;">✗</div>';
+        document.getElementById('status').innerHTML = 
+          '<span class="error">✗ Error: ' + error.message + '</span>';
+        setTimeout(loadQR, 5000);
+      }
+    }
+    loadQR();
+  </script>
+</body>
+</html>
+  `);
 });
 
 // Send message to specific group (queued)

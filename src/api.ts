@@ -422,8 +422,8 @@ app.get('/qr', (_req: Request, res: Response) => {
 // Setup endpoint - runs migrations (PUBLIC, one-time use)
 app.get('/setup', async (_req: Request, res: Response) => {
   try {
-    const { getSql } = await import('./db');
-    const sql = getSql();
+    const { getDb } = await import('./db');
+    const sql = getDb();
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
 
@@ -518,8 +518,8 @@ app.use('/api', apiKeyAuth);
 // Run database migrations (admin endpoint - protected)
 app.post('/api/migrate', async (_req: Request, res: Response) => {
   try {
-    const { getSql } = await import('./db');
-    const sql = getSql();
+    const { getDb } = await import('./db');
+    const sql = getDb();
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
 

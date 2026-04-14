@@ -1,5 +1,6 @@
 // OpenAI API Configuration
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+// Supports OpenAI and OpenRouter (set OPENAI_API_URL to https://openrouter.ai/api/v1/chat/completions)
+const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
 const OPENAI_MODEL = 'gpt-4.1';
 
 interface OpenAIMessage {
@@ -24,12 +25,20 @@ async function callOpenAIWithModel(
   model: string = OPENAI_MODEL
 ): Promise<{ success: boolean; content: string | null; error?: string }> {
   try {
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    };
+
+    // Add OpenRouter-specific headers if using OpenRouter
+    if (OPENAI_API_URL.includes('openrouter.ai')) {
+      headers['HTTP-Referer'] = process.env.OPENROUTER_REFERER || 'https://github.com/iung1012/whatsapp-public-logan';
+      headers['X-Title'] = process.env.OPENROUTER_TITLE || 'Logan WhatsApp Bot';
+    }
+
     const response = await fetch(OPENAI_API_URL, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model,
         messages,

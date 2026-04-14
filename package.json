@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "watch": "tsc -w",
+    "migrate": "ts-node scripts/run-migrations.ts",
     "shavua-tov": "ts-node src/scripts/shavua-tov.ts",
     "manual-join-requests": "ts-node scripts/manual-join-request-check.ts",
     "debug-admin": "ts-node scripts/debug-admin-status.ts"

@@ -419,7 +419,14 @@ app.get('/qr', (_req: Request, res: Response) => {
   `);
 });
 
-// Run database migrations (admin endpoint)
+// ============================================================================
+// PROTECTED API ENDPOINTS (require API key)
+// ============================================================================
+
+// Apply API key auth to remaining /api routes
+app.use('/api', apiKeyAuth);
+
+// Run database migrations (admin endpoint - protected)
 app.post('/api/migrate', async (_req: Request, res: Response) => {
   try {
     const { getSql } = await import('./db');
@@ -472,10 +479,6 @@ app.post('/api/migrate', async (_req: Request, res: Response) => {
     });
   }
 });
-
-// ============================================================================
-// PROTECTED API ENDPOINTS (require API key)
-// ============================================================================
 
 // Apply API key auth to remaining /api routes
 app.use('/api', apiKeyAuth);

@@ -419,6 +419,95 @@ app.get('/qr', (_req: Request, res: Response) => {
   `);
 });
 
+// Setup endpoint - runs migrations (PUBLIC, one-time use)
+app.get('/setup', async (_req: Request, res: Response) => {
+  try {
+    const { getSql } = await import('./db');
+    const sql = getSql();
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+
+    const migrations = [
+      '000_create_whatsapp_messages.sql',
+      '001_create_broadcast_guard.sql',
+      '002_add_atomic_lock_index.sql',
+      '003_create_pending_responses.sql',
+      '004_create_tavily_searches.sql',
+      '005_create_whatsapp_auth_state.sql'
+    ];
+
+    const results: string[] = [];
+
+    for (const migration of migrations) {
+      const filePath = join(process.cwd(), 'migrations', migration);
+      const migrationSQL = readFileSync(filePath, 'utf-8');
+
+      try {
+        await sql.unsafe(migrationSQL);
+        results.push(`✓ ${migration}`);
+        console.log(`[SETUP] ✓ ${migration}`);
+      } catch (error: any) {
+        if (error.code === '42P07') {
+          results.push(`⊘ ${migration} (already exists)`);
+          console.log(`[SETUP] ⊘ ${migration} (already exists)`);
+        } else {
+          results.push(`✗ ${migration}: ${error.message}`);
+          console.error(`[SETUP] ✗ ${migration}:`, error.message);
+        }
+      }
+    }
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Database Setup - Logan Bot</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #1a1a1a;
+      color: #0f0;
+      padding: 2rem;
+    }
+    h1 { color: #0f0; }
+    .result { margin: 0.5rem 0; }
+    .success { color: #0f0; }
+    .skip { color: #ff0; }
+    .error { color: #f00; }
+  </style>
+</head>
+<body>
+  <h1>🚀 Database Setup Complete</h1>
+  <div>
+    ${results.map(r => {
+      const className = r.startsWith('✓') ? 'success' : r.startsWith('⊘') ? 'skip' : 'error';
+      return `<div class="result ${className}">${r}</div>`;
+    }).join('')}
+  </div>
+  <p style="margin-top: 2rem;">You can now use the bot!</p>
+</body>
+</html>
+    `);
+  } catch (error: any) {
+    console.error('[SETUP] Failed:', error);
+    res.status(500).send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Setup Failed</title>
+  <style>
+    body { font-family: monospace; background: #1a1a1a; color: #f00; padding: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>❌ Setup Failed</h1>
+  <pre>${error.message}</pre>
+</body>
+</html>
+    `);
+  }
+});
+
 // ============================================================================
 // PROTECTED API ENDPOINTS (require API key)
 // ============================================================================

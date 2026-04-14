@@ -1,38 +1,33 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { initDb, getDb } from './db';
 import { WhatsAppMessage } from './types';
 
-let supabase: SupabaseClient | null = null;
-
-export function initSupabase(): SupabaseClient {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_KEY environment variables');
-  }
-
-  supabase = createClient(supabaseUrl, supabaseKey);
-  console.log(`[${new Date().toISOString()}] Supabase client initialized`);
-  return supabase;
+export function initSupabase(): void {
+  initDb();
 }
 
 export async function saveMessage(message: WhatsAppMessage): Promise<boolean> {
-  if (!supabase) {
-    console.error(`[${new Date().toISOString()}] Supabase client not initialized`);
-    return false;
-  }
-
   try {
-    const { error } = await supabase
-      .from('whatsapp_messages')
-      .upsert(message, { onConflict: 'id' });
+    const sql = getDb();
+    await sql`
+      INSERT INTO whatsapp_messages (
+        id, chat_id, chat_name, sender_name, sender_number,
+        message_type, body, timestamp, from_me, is_group,
+        is_content, message_key_json, reacted_to_id
+      ) VALUES (
+        ${message.id}, ${message.chat_id}, ${message.chat_name},
+        ${message.sender_name ?? null}, ${message.sender_number ?? null},
+        ${message.message_type}, ${message.body ?? null}, ${message.timestamp},
+        ${message.from_me}, ${message.is_group}, ${message.is_content},
+        ${message.message_key_json ?? null}, ${message.reacted_to_id ?? null}
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        chat_name        = EXCLUDED.chat_name,
+        sender_name      = EXCLUDED.sender_name,
+        body             = EXCLUDED.body,
+        message_key_json = EXCLUDED.message_key_json,
+        reacted_to_id    = EXCLUDED.reacted_to_id
+    `;
 
-    if (error) {
-      console.error(`[${new Date().toISOString()}] Error saving message ${message.id}:`, error.message);
-      return false;
-    }
-
-    // Distinguish between groups and channels in logging
     const chatPrefix = message.chat_id.endsWith('@newsletter') ? 'Channel' : 'Group';
     console.log(
       `[${new Date().toISOString()}] [MESSAGE] ${chatPrefix}: ${message.chat_name} | ` +
@@ -46,10 +41,6 @@ export async function saveMessage(message: WhatsAppMessage): Promise<boolean> {
   }
 }
 
-export function getSupabaseClient(): SupabaseClient | null {
-  return supabase;
-}
-
 interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -57,45 +48,26 @@ interface ConversationMessage {
   timestamp: number;
 }
 
-/**
- * Get recent conversation history between users and the bot in a group
- * @param groupId - The group chat ID
- * @param botNumbers - Array of bot phone numbers/LIDs to identify bot messages
- * @param limit - Maximum number of messages to return (default 10)
- */
 export async function getConversationHistory(
   groupId: string,
   botNumbers: string[],
   limit: number = 10
 ): Promise<ConversationMessage[]> {
-  if (!supabase) {
-    console.warn('[Supabase] Client not initialized, cannot get conversation history');
-    return [];
-  }
-
   try {
-    // Get recent messages from this group that have content
-    const { data, error } = await supabase
-      .from('whatsapp_messages')
-      .select('sender_number, sender_name, body, timestamp, from_me')
-      .eq('chat_id', groupId)
-      .eq('is_content', true)
-      .not('body', 'is', null)
-      .order('timestamp', { ascending: false })
-      .limit(limit * 2); // Get more to filter down to relevant ones
+    const sql = getDb();
+    const rows = await sql<{ sender_number: string; sender_name: string; body: string; timestamp: number; from_me: boolean }[]>`
+      SELECT sender_number, sender_name, body, timestamp, from_me
+      FROM whatsapp_messages
+      WHERE chat_id = ${groupId}
+        AND is_content = true
+        AND body IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ${limit * 2}
+    `;
 
-    if (error) {
-      console.error('[Supabase] Error getting conversation history:', error.message);
-      return [];
-    }
+    if (rows.length === 0) return [];
 
-    if (!data || data.length === 0) {
-      return [];
-    }
-
-    // Convert to conversation format
-    // Messages from bot numbers are 'assistant', others are 'user'
-    const history: ConversationMessage[] = data
+    return rows
       .filter(msg => msg.body && msg.body.trim())
       .map(msg => {
         const isBot = msg.from_me || (msg.sender_number && botNumbers.includes(msg.sender_number));
@@ -103,21 +75,16 @@ export async function getConversationHistory(
           role: isBot ? 'assistant' as const : 'user' as const,
           content: msg.body,
           senderName: msg.sender_name || undefined,
-          timestamp: msg.timestamp
+          timestamp: msg.timestamp,
         };
       })
       .slice(0, limit)
-      .reverse(); // Chronological order (oldest first)
-
-    return history;
+      .reverse();
   } catch (err) {
-    console.error('[Supabase] Exception getting conversation history:', err);
+    console.error('[DB] Exception getting conversation history:', err);
     return [];
   }
 }
-
-// Like emojis that count as "likes"
-const LIKE_EMOJIS = ['👍', '❤️', '🔥', '💯', '👏', '🙌', '💪', '⭐', '🌟', '✨'];
 
 // ============================================
 // Pending Responses Persistence
@@ -134,130 +101,61 @@ export interface PendingResponse {
   retry_count?: number;
 }
 
-/**
- * Save a pending response that couldn't be delivered due to connection issues
- */
-export async function savePendingResponse(pendingResponse: Omit<PendingResponse, 'id' | 'created_at'>): Promise<boolean> {
-  if (!supabase) {
-    console.error('[Supabase] Client not initialized, cannot save pending response');
-    return false;
-  }
-
+export async function savePendingResponse(
+  pendingResponse: Omit<PendingResponse, 'id' | 'created_at'>
+): Promise<boolean> {
   try {
-    const { error } = await supabase
-      .from('pending_responses')
-      .insert({
-        group_id: pendingResponse.group_id,
-        sender_number: pendingResponse.sender_number,
-        sender_name: pendingResponse.sender_name,
-        response: pendingResponse.response,
-        response_type: pendingResponse.response_type,
-        retry_count: pendingResponse.retry_count || 0
-      });
-
-    if (error) {
-      console.error('[Supabase] Error saving pending response:', error.message);
-      return false;
-    }
-
-    console.log(`[Supabase] Saved pending ${pendingResponse.response_type} response for ${pendingResponse.sender_name}`);
+    const sql = getDb();
+    await sql`
+      INSERT INTO pending_responses (group_id, sender_number, sender_name, response, response_type, retry_count)
+      VALUES (
+        ${pendingResponse.group_id}, ${pendingResponse.sender_number},
+        ${pendingResponse.sender_name}, ${pendingResponse.response},
+        ${pendingResponse.response_type}, ${pendingResponse.retry_count || 0}
+      )
+    `;
+    console.log(`[DB] Saved pending ${pendingResponse.response_type} response for ${pendingResponse.sender_name}`);
     return true;
   } catch (err) {
-    console.error('[Supabase] Exception saving pending response:', err);
+    console.error('[DB] Exception saving pending response:', err);
     return false;
   }
 }
 
-/**
- * Get all pending responses that haven't been delivered yet
- */
 export async function getPendingResponses(): Promise<PendingResponse[]> {
-  if (!supabase) {
-    console.warn('[Supabase] Client not initialized, cannot get pending responses');
-    return [];
-  }
-
   try {
-    const { data, error } = await supabase
-      .from('pending_responses')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.error('[Supabase] Error getting pending responses:', error.message);
-      return [];
-    }
-
-    return (data || []) as PendingResponse[];
+    const sql = getDb();
+    const rows = await sql<PendingResponse[]>`
+      SELECT id, group_id, sender_number, sender_name, response, response_type, created_at, retry_count
+      FROM pending_responses
+      ORDER BY created_at ASC
+    `;
+    return rows;
   } catch (err) {
-    console.error('[Supabase] Exception getting pending responses:', err);
+    console.error('[DB] Exception getting pending responses:', err);
     return [];
   }
 }
 
-/**
- * Delete a pending response after it's been successfully delivered
- */
 export async function deletePendingResponse(id: string): Promise<boolean> {
-  if (!supabase) {
-    console.error('[Supabase] Client not initialized, cannot delete pending response');
-    return false;
-  }
-
   try {
-    const { error } = await supabase
-      .from('pending_responses')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('[Supabase] Error deleting pending response:', error.message);
-      return false;
-    }
-
-    console.log(`[Supabase] Deleted pending response ${id}`);
+    const sql = getDb();
+    await sql`DELETE FROM pending_responses WHERE id = ${id}`;
+    console.log(`[DB] Deleted pending response ${id}`);
     return true;
   } catch (err) {
-    console.error('[Supabase] Exception deleting pending response:', err);
+    console.error('[DB] Exception deleting pending response:', err);
     return false;
   }
 }
 
-/**
- * Increment retry count for a pending response
- */
 export async function incrementPendingResponseRetry(id: string): Promise<boolean> {
-  if (!supabase) {
-    return false;
-  }
-
   try {
-    // First get current retry_count
-    const { data, error: getError } = await supabase
-      .from('pending_responses')
-      .select('retry_count')
-      .eq('id', id)
-      .single();
-
-    if (getError || !data) {
-      console.error('[Supabase] Error getting retry count:', getError?.message);
-      return false;
-    }
-
-    // Then update with incremented value
-    const { error: updateError } = await supabase
-      .from('pending_responses')
-      .update({ retry_count: (data.retry_count || 0) + 1 })
-      .eq('id', id);
-
-    if (updateError) {
-      console.error('[Supabase] Error incrementing retry count:', updateError.message);
-      return false;
-    }
-
+    const sql = getDb();
+    await sql`UPDATE pending_responses SET retry_count = retry_count + 1 WHERE id = ${id}`;
     return true;
   } catch (err) {
-    console.error('[Supabase] Exception incrementing retry count:', err);
+    console.error('[DB] Exception incrementing retry count:', err);
     return false;
   }
 }
@@ -269,74 +167,55 @@ interface LikedMessage {
   messageBody: string;
 }
 
-/**
- * Get recent messages in a group that have received likes/reactions
- * @param groupId - The group chat ID
- * @param limit - Maximum number of messages to check
- */
 export async function getMessagesWithLikes(
   groupId: string,
   limit: number = 50
 ): Promise<LikedMessage[]> {
-  if (!supabase) {
-    console.warn('[Supabase] Client not initialized, cannot get liked messages');
-    return [];
-  }
-
   try {
-    // Get reactions (messages of type 'reaction') from this group
-    const { data: reactions, error: reactionError } = await supabase
-      .from('whatsapp_messages')
-      .select('body, reacted_to_id')
-      .eq('chat_id', groupId)
-      .eq('message_type', 'reaction')
-      .not('reacted_to_id', 'is', null)
-      .order('timestamp', { ascending: false })
-      .limit(200); // Check recent reactions
+    const sql = getDb();
 
-    if (reactionError || !reactions || reactions.length === 0) {
-      return [];
-    }
+    const reactions = await sql<{ body: string; reacted_to_id: string }[]>`
+      SELECT body, reacted_to_id
+      FROM whatsapp_messages
+      WHERE chat_id = ${groupId}
+        AND message_type = 'reaction'
+        AND reacted_to_id IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT 200
+    `;
 
-    // Count ALL emoji reactions per message (not just likes)
+    if (reactions.length === 0) return [];
+
     const likeCounts = new Map<string, number>();
     for (const reaction of reactions) {
       if (reaction.reacted_to_id && reaction.body) {
-        const count = likeCounts.get(reaction.reacted_to_id) || 0;
-        likeCounts.set(reaction.reacted_to_id, count + 1);
+        likeCounts.set(reaction.reacted_to_id, (likeCounts.get(reaction.reacted_to_id) || 0) + 1);
       }
     }
 
-    if (likeCounts.size === 0) {
-      return [];
-    }
+    if (likeCounts.size === 0) return [];
 
-    // Get the message keys for liked messages
     const likedIds = Array.from(likeCounts.keys());
-    const { data: messages, error: msgError } = await supabase
-      .from('whatsapp_messages')
-      .select('id, message_key_json, body')
-      .in('id', likedIds)
-      .not('message_key_json', 'is', null);
+    const messages = await sql<{ id: string; message_key_json: string; body: string }[]>`
+      SELECT id, message_key_json, body
+      FROM whatsapp_messages
+      WHERE id = ANY(${likedIds})
+        AND message_key_json IS NOT NULL
+    `;
 
-    if (msgError || !messages) {
-      return [];
-    }
-
-    // Build result with like counts
     return messages
       .filter(m => m.message_key_json)
       .map(m => ({
         messageId: m.id,
         messageKeyJson: m.message_key_json,
         likeCount: likeCounts.get(m.id) || 0,
-        messageBody: m.body || ''
+        messageBody: m.body || '',
       }))
       .filter(m => m.likeCount > 0)
       .sort((a, b) => b.likeCount - a.likeCount)
       .slice(0, limit);
   } catch (err) {
-    console.error('[Supabase] Exception getting liked messages:', err);
+    console.error('[DB] Exception getting liked messages:', err);
     return [];
   }
 }

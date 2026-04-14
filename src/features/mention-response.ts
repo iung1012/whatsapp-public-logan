@@ -3,7 +3,8 @@
  * Uses Groq API to respond when the bot is mentioned in a monitored group
  */
 
-import { getSupabaseClient, getMessagesWithLikes, savePendingResponse, getPendingResponses, deletePendingResponse, PendingResponse } from '../supabase';
+import { getMessagesWithLikes, savePendingResponse, getPendingResponses, deletePendingResponse, PendingResponse } from '../supabase';
+import { getDb } from '../db';
 import { callGroq, buildMentionPrompt } from '../services/groq';
 import { isConnected, isStable, waitForStability, getSocket } from '../connection';
 import { ALLOWED_GROUPS } from '../config';
@@ -383,34 +384,18 @@ async function getGroupMessages(
   groupId: string,
   limit: number = 10
 ): Promise<Array<{ senderName: string; body: string }>> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    console.error('[MENTION] Supabase not initialized');
-    return [];
-  }
-
   try {
-    const { data, error } = await supabase
-      .from('whatsapp_messages')
-      .select('sender_name, body')
-      .eq('chat_id', groupId)
-      .eq('is_content', true)
-      .not('body', 'is', null)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('[MENTION] Error fetching group messages:', error.message);
-      return [];
-    }
-
-    // Reverse to chronological order and format
-    return (data || [])
-      .reverse()
-      .map(m => ({
-        senderName: m.sender_name || 'Unknown',
-        body: m.body || ''
-      }));
+    const sql = getDb();
+    const rows = await sql<{ sender_name: string; body: string }[]>`
+      SELECT sender_name, body
+      FROM whatsapp_messages
+      WHERE chat_id = ${groupId}
+        AND is_content = true
+        AND body IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ${limit}
+    `;
+    return rows.reverse().map(m => ({ senderName: m.sender_name || 'Unknown', body: m.body || '' }));
   } catch (err) {
     console.error('[MENTION] Exception fetching group messages:', err);
     return [];
@@ -425,32 +410,19 @@ async function getUserMessages(
   senderNumber: string,
   limit: number = 3
 ): Promise<Array<{ body: string }>> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    console.error('[MENTION] Supabase not initialized');
-    return [];
-  }
-
   try {
-    const { data, error } = await supabase
-      .from('whatsapp_messages')
-      .select('body')
-      .eq('chat_id', groupId)
-      .eq('sender_number', senderNumber)
-      .eq('is_content', true)
-      .not('body', 'is', null)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('[MENTION] Error fetching user messages:', error.message);
-      return [];
-    }
-
-    // Reverse to chronological order
-    return (data || [])
-      .reverse()
-      .map(m => ({ body: m.body || '' }));
+    const sql = getDb();
+    const rows = await sql<{ body: string }[]>`
+      SELECT body
+      FROM whatsapp_messages
+      WHERE chat_id = ${groupId}
+        AND sender_number = ${senderNumber}
+        AND is_content = true
+        AND body IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ${limit}
+    `;
+    return rows.reverse().map(m => ({ body: m.body || '' }));
   } catch (err) {
     console.error('[MENTION] Exception fetching user messages:', err);
     return [];

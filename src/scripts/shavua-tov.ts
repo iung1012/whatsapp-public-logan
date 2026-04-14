@@ -9,7 +9,8 @@
  */
 
 import 'dotenv/config';
-import { initSupabase, getSupabaseClient } from '../supabase';
+import { initSupabase } from '../supabase';
+import { getDb } from '../db';
 import { connectToWhatsApp, getSocket, isConnected, isStable, waitForStability } from '../connection';
 import { ALLOWED_GROUPS } from '../config';
 import { textToSpeech, isElevenLabsEnabled } from '../services/elevenlabs';
@@ -85,34 +86,20 @@ function isValidIsraeliPhone(number: string | null): boolean {
 async function getGroupMessages48Hours(
   groupId: string
 ): Promise<Array<{ senderName: string | null; senderNumber: string | null; body: string | null }>> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    console.error('[SHAVUA-TOV] Supabase not initialized');
-    return [];
-  }
-
   const fortyEightHoursAgo = Math.floor((Date.now() - 48 * 60 * 60 * 1000) / 1000);
 
   try {
-    const { data, error } = await supabase
-      .from('whatsapp_messages')
-      .select('sender_name, sender_number, body')
-      .eq('chat_id', groupId)
-      .eq('is_content', true)
-      .gte('timestamp', fortyEightHoursAgo)
-      .order('timestamp', { ascending: true })
-      .limit(1000);
-
-    if (error) {
-      console.error('[SHAVUA-TOV] Error fetching group messages:', error.message);
-      return [];
-    }
-
-    return (data || []).map(m => ({
-      senderName: m.sender_name,
-      senderNumber: m.sender_number,
-      body: m.body
-    }));
+    const sql = getDb();
+    const rows = await sql<{ sender_name: string; sender_number: string; body: string }[]>`
+      SELECT sender_name, sender_number, body
+      FROM whatsapp_messages
+      WHERE chat_id = ${groupId}
+        AND is_content = true
+        AND timestamp >= ${fortyEightHoursAgo}
+      ORDER BY timestamp ASC
+      LIMIT 1000
+    `;
+    return rows.map(m => ({ senderName: m.sender_name, senderNumber: m.sender_number, body: m.body }));
   } catch (err) {
     console.error('[SHAVUA-TOV] Exception fetching group messages:', err);
     return [];

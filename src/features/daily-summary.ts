@@ -6,7 +6,7 @@
 import * as schedule from 'node-schedule';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getSupabaseClient } from '../supabase';
+import { getDb } from '../db';
 import { callClaude, callClaudeForVoice, buildDailySummaryPrompt, callClaudeForMasterSummary, callClaudeForMasterVoice, buildMasterSummaryPrompt } from '../services/claude';
 import { textToSpeech, isElevenLabsEnabled } from '../services/elevenlabs';
 import { isConnected, isStable, getSocket } from '../connection';
@@ -286,35 +286,20 @@ function getSummaryTime(): { hour: number; minute: number } {
 async function getGroupMessagesLast24Hours(
   groupId: string
 ): Promise<Array<{ senderName: string | null; senderNumber: string | null; body: string | null }>> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    console.error('[DAILY] Supabase not initialized');
-    return [];
-  }
-
   const twentyFourHoursAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
 
   try {
-    const { data, error } = await supabase
-      .from('whatsapp_messages')
-      .select('sender_name, sender_number, body')
-      .eq('chat_id', groupId)
-      .eq('is_content', true)
-      .gte('timestamp', twentyFourHoursAgo)
-      .order('timestamp', { ascending: true })
-      .limit(770);
-
-    if (error) {
-      console.error('[DAILY] Error fetching group messages:', error.message);
-      return [];
-    }
-
-    // Map snake_case fields from Supabase to camelCase
-    return (data || []).map(m => ({
-      senderName: m.sender_name,
-      senderNumber: m.sender_number,
-      body: m.body
-    }));
+    const sql = getDb();
+    const rows = await sql<{ sender_name: string; sender_number: string; body: string }[]>`
+      SELECT sender_name, sender_number, body
+      FROM whatsapp_messages
+      WHERE chat_id = ${groupId}
+        AND is_content = true
+        AND timestamp >= ${twentyFourHoursAgo}
+      ORDER BY timestamp ASC
+      LIMIT 770
+    `;
+    return rows.map(m => ({ senderName: m.sender_name, senderNumber: m.sender_number, body: m.body }));
   } catch (err) {
     console.error('[DAILY] Exception fetching group messages:', err);
     return [];
@@ -327,40 +312,28 @@ async function getGroupMessagesLast24Hours(
 async function getAllGroupsMessagesLast24Hours(
   groupIds: string[]
 ): Promise<{ messagesByGroup: Map<string, Array<{ senderName: string | null; body: string | null }>>; totalCount: number }> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    console.error('[DAILY] Supabase not initialized');
-    return { messagesByGroup: new Map(), totalCount: 0 };
-  }
-
   const twentyFourHoursAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
   const messagesByGroup = new Map<string, Array<{ senderName: string | null; body: string | null }>>();
   let totalCount = 0;
 
   try {
+    const sql = getDb();
     for (const groupId of groupIds) {
-      const { data, error } = await supabase
-        .from('whatsapp_messages')
-        .select('sender_name, body, chat_name')
-        .eq('chat_id', groupId)
-        .eq('is_content', true)
-        .gte('timestamp', twentyFourHoursAgo)
-        .order('timestamp', { ascending: true })
-        .limit(200); // Limit per group for master summary
+      const rows = await sql<{ sender_name: string; body: string; chat_name: string }[]>`
+        SELECT sender_name, body, chat_name
+        FROM whatsapp_messages
+        WHERE chat_id = ${groupId}
+          AND is_content = true
+          AND timestamp >= ${twentyFourHoursAgo}
+        ORDER BY timestamp ASC
+        LIMIT 200
+      `;
 
-      if (error) {
-        console.error(`[DAILY] Error fetching messages for ${groupId}:`, error.message);
-        continue;
-      }
-
-      if (data && data.length > 0) {
-        const groupName = data[0].chat_name || groupId;
-        const messages = data.map(m => ({
-          senderName: m.sender_name,
-          body: m.body
-        }));
+      if (rows.length > 0) {
+        const groupName = rows[0].chat_name || groupId;
+        const messages = rows.map(m => ({ senderName: m.sender_name, body: m.body }));
         messagesByGroup.set(groupName, messages);
-        totalCount += data.length;
+        totalCount += rows.length;
       }
     }
 

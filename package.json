@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-logger",
   "version": "1.0.0",
-  "description": "WhatsApp message logger using Baileys with Supabase storage",
+  "description": "WhatsApp message logger using Baileys with PostgreSQL storage",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -15,13 +15,13 @@
   "keywords": [
     "whatsapp",
     "baileys",
-    "supabase",
+    "postgres",
     "logger"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "postgres": "^3.4.4",
     "@whiskeysockets/baileys": "^6.7.21",
     "dotenv": "^16.3.1",
     "express": "^5.2.1",

@@ -5,7 +5,7 @@
  * CACHED: Similar queries within TTL are served from Supabase cache
  */
 
-import { getSupabaseClient } from '../supabase';
+import { getDb } from '../db';
 
 const TAVILY_API_URL = 'https://api.tavily.com/search';
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
@@ -227,46 +227,30 @@ function normalizeQueryForCache(query: string): string {
  * Check Supabase cache for a recent similar query
  */
 async function getCachedSearch(searchQuery: string): Promise<CachedSearch | null> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return null;
-  }
-
   const normalizedQuery = normalizeQueryForCache(searchQuery);
   const cacheThreshold = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
 
   try {
-    const { data, error } = await supabase
-      .from('tavily_searches')
-      .select('answer, results, timestamp')
-      .eq('search_query_normalized', normalizedQuery)
-      .gte('timestamp', cacheThreshold)
-      .order('timestamp', { ascending: false })
-      .limit(1)
-      .single();
+    const sql = getDb();
+    const rows = await sql<{ answer: string; results: TavilySearchResult[]; timestamp: number }[]>`
+      SELECT answer, results, timestamp
+      FROM tavily_searches
+      WHERE search_query_normalized = ${normalizedQuery}
+        AND timestamp >= ${cacheThreshold}
+      ORDER BY timestamp DESC
+      LIMIT 1
+    `;
 
-    if (error) {
-      // No cached result found or table doesn't exist
-      if (error.code === 'PGRST116' || error.code === '42P01' || error.code === '42703') {
-        return null;
-      }
-      console.log(`[TAVILY] Cache lookup error: ${error.message}`);
-      return null;
+    if (rows.length === 0) return null;
+
+    const data = rows[0];
+    const age = Math.floor(Date.now() / 1000) - data.timestamp;
+    console.log(`[TAVILY] Cache HIT! Query "${searchQuery}" found (age: ${Math.floor(age / 60)} minutes)`);
+    return { answer: data.answer, results: data.results, timestamp: data.timestamp };
+  } catch (err: any) {
+    if (err.code !== '42P01' && err.code !== '42703') {
+      console.log('[TAVILY] Cache lookup exception:', err);
     }
-
-    if (data) {
-      const age = Math.floor(Date.now() / 1000) - data.timestamp;
-      console.log(`[TAVILY] Cache HIT! Query "${searchQuery}" found (age: ${Math.floor(age / 60)} minutes)`);
-      return {
-        answer: data.answer,
-        results: data.results as TavilySearchResult[],
-        timestamp: data.timestamp
-      };
-    }
-
-    return null;
-  } catch (err) {
-    console.log('[TAVILY] Cache lookup exception:', err);
     return null;
   }
 }
@@ -285,46 +269,26 @@ async function saveTavilySearchToSupabase(
   responseTime: number,
   fromCache: boolean = false
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    console.log('[TAVILY] Supabase not available, skipping save');
-    return;
-  }
-
   try {
-    const { error } = await supabase
-      .from('tavily_searches')
-      .insert({
-        chat_id: chatId,
-        sender_number: senderNumber,
-        sender_name: senderName,
-        original_query: originalQuery,
-        search_query: searchQuery,
-        search_query_normalized: normalizeQueryForCache(searchQuery),
-        answer: answer,
-        results: results,
-        results_count: results.length,
-        response_time: responseTime,
-        from_cache: fromCache,
-        timestamp: Math.floor(Date.now() / 1000)
-      });
-
-    if (error) {
-      // Table might not exist yet - log but don't fail
-      if (error.code === '42P01') {
-        console.log('[TAVILY] tavily_searches table does not exist yet, skipping save');
-      } else if (error.code === '42703') {
-        // Column doesn't exist - try without the new columns for backwards compatibility
-        console.log('[TAVILY] Missing column, trying legacy save...');
-        await saveTavilySearchLegacy(chatId, senderNumber, senderName, originalQuery, searchQuery, answer, results, responseTime);
-      } else {
-        console.error('[TAVILY] Error saving search to Supabase:', error.message);
-      }
+    const sql = getDb();
+    await sql`
+      INSERT INTO tavily_searches (
+        chat_id, sender_number, sender_name, original_query, search_query,
+        search_query_normalized, answer, results, results_count, response_time,
+        from_cache, timestamp
+      ) VALUES (
+        ${chatId}, ${senderNumber}, ${senderName}, ${originalQuery}, ${searchQuery},
+        ${normalizeQueryForCache(searchQuery)}, ${answer}, ${sql.json(results as any)},
+        ${results.length}, ${responseTime}, ${fromCache}, ${Math.floor(Date.now() / 1000)}
+      )
+    `;
+    console.log(`[TAVILY] Search saved to database (from_cache: ${fromCache})`);
+  } catch (err: any) {
+    if (err.code === '42P01') {
+      console.log('[TAVILY] tavily_searches table does not exist yet, skipping save');
     } else {
-      console.log(`[TAVILY] Search saved to Supabase (from_cache: ${fromCache})`);
+      console.error('[TAVILY] Exception saving search:', err);
     }
-  } catch (err) {
-    console.error('[TAVILY] Exception saving search:', err);
   }
 }
 
@@ -341,32 +305,20 @@ async function saveTavilySearchLegacy(
   results: TavilySearchResult[],
   responseTime: number
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return;
-
   try {
-    const { error } = await supabase
-      .from('tavily_searches')
-      .insert({
-        chat_id: chatId,
-        sender_number: senderNumber,
-        sender_name: senderName,
-        original_query: originalQuery,
-        search_query: searchQuery,
-        answer: answer,
-        results: results,
-        results_count: results.length,
-        response_time: responseTime,
-        timestamp: Math.floor(Date.now() / 1000)
-      });
-
-    if (error) {
-      console.error('[TAVILY] Legacy save error:', error.message);
-    } else {
-      console.log('[TAVILY] Search saved (legacy mode)');
-    }
-  } catch (err) {
-    console.error('[TAVILY] Legacy save exception:', err);
+    const sql = getDb();
+    await sql`
+      INSERT INTO tavily_searches (
+        chat_id, sender_number, sender_name, original_query, search_query,
+        answer, results, results_count, response_time, timestamp
+      ) VALUES (
+        ${chatId}, ${senderNumber}, ${senderName}, ${originalQuery}, ${searchQuery},
+        ${answer}, ${sql.json(results as any)}, ${results.length}, ${responseTime},
+        ${Math.floor(Date.now() / 1000)}
+      )
+    `;
+  } catch (err: any) {
+    console.error('[TAVILY] Legacy save error:', err.message);
   }
 }
 

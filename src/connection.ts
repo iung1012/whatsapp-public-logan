@@ -22,6 +22,7 @@ let isStableConnection = false;
 let botJid: string | null = null; // Bot's own JID (phone number format)
 let botLid: string | null = null; // Bot's LID (internal WhatsApp ID)
 let isReconnecting = false; // Prevent multiple simultaneous reconnection attempts
+let currentQrCode: string | null = null; // Current QR code for API access
 
 // Add random jitter to avoid predictable patterns (WhatsApp detects bots)
 function addJitter(baseMs: number, jitterPercent: number = 0.3): number {
@@ -164,6 +165,7 @@ export async function connectToWhatsApp(onConnected: MessageHandler): Promise<vo
 
     // Display QR code when needed
     if (qr) {
+      currentQrCode = qr; // Store for API access
       console.log(`\n[${new Date().toISOString()}] Scan this QR code with WhatsApp:\n`);
       qrcode.generate(qr, { small: true });
       console.log('\n');
@@ -243,6 +245,7 @@ export async function connectToWhatsApp(onConnected: MessageHandler): Promise<vo
     }
 
     if (connection === 'open') {
+      currentQrCode = null; // Clear QR code when connected
       lastConnectedAt = Date.now();
       reconnectAttempts = 0;
 
@@ -340,4 +343,9 @@ export function getBotJid(): string | null {
 // Get the bot's LID (internal WhatsApp ID)
 export function getBotLid(): string | null {
   return botLid;
+}
+
+// Get the current QR code (for API access)
+export function getCurrentQrCode(): string | null {
+  return currentQrCode;
 }

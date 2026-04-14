@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { getSocket, isConnected, isStable } from './connection';
+import { getSocket, isConnected, isStable, getCurrentQrCode } from './connection';
 import { ALLOWED_GROUPS } from './config';
 import { saveMessage } from './supabase';
 import { WhatsAppMessage } from './types';
@@ -8,6 +8,7 @@ import { runDailySummary, isDailySummaryEnabled, processGroupSummary, isSummaryI
 import { sendBroadcast } from './features/broadcast';
 import { textToSpeech, isElevenLabsEnabled } from './services/elevenlabs';
 import { markdownToWhatsApp } from './utils/formatting';
+import QRCode from 'qrcode';
 
 const app = express();
 app.use(express.json());
@@ -260,6 +261,47 @@ app.get('/api/health', (_req: Request, res: Response) => {
       processing: processing
     }
   });
+});
+
+// Get QR code for WhatsApp authentication
+// Returns QR code as PNG image or JSON with status
+app.get('/api/qr', async (req: Request, res: Response) => {
+  const qrData = getCurrentQrCode();
+  const format = req.query.format as string || 'image'; // 'image' or 'json'
+
+  if (!qrData) {
+    if (isConnected()) {
+      return res.status(200).json({ 
+        status: 'connected',
+        message: 'WhatsApp is already connected. No QR code needed.' 
+      });
+    }
+    return res.status(404).json({ 
+      status: 'unavailable',
+      message: 'QR code not available yet. Please wait for connection initialization.' 
+    });
+  }
+
+  if (format === 'json') {
+    return res.json({ 
+      status: 'available',
+      qr: qrData 
+    });
+  }
+
+  // Return as PNG image
+  try {
+    const qrImage = await QRCode.toBuffer(qrData, { 
+      type: 'png',
+      width: 400,
+      margin: 2
+    });
+    res.setHeader('Content-Type', 'image/png');
+    res.send(qrImage);
+  } catch (error) {
+    console.error('Error generating QR code image:', error);
+    res.status(500).json({ error: 'Failed to generate QR code image' });
+  }
 });
 
 // Send message to specific group (queued)

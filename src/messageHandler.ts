@@ -600,8 +600,8 @@ export function setupMessageHandler(sock: WASocket): void {
 
         // Filter messages based on type
         if (isGroup || isChannel) {
-          // For groups and channels: only process if in allowed list
-          if (!ALLOWED_GROUP_IDS.has(chatId)) {
+          // For groups and channels: only process if in allowed list (or if no list configured)
+          if (ALLOWED_GROUP_IDS.size > 0 && !ALLOWED_GROUP_IDS.has(chatId)) {
             console.log(`[${new Date().toISOString()}] [DEBUG] Skipping: ${isChannel ? 'channel' : 'group'} not in allowed list`);
             continue;
           }

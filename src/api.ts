@@ -239,11 +239,8 @@ function apiKeyAuth(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
-// Apply API key auth to all /api routes
-app.use('/api', apiKeyAuth);
-
 // ============================================================================
-// API ENDPOINTS
+// PUBLIC API ENDPOINTS (no auth required)
 // ============================================================================
 
 // Health check endpoint with detailed status
@@ -421,6 +418,13 @@ app.get('/qr', (_req: Request, res: Response) => {
 </html>
   `);
 });
+
+// ============================================================================
+// PROTECTED API ENDPOINTS (require API key)
+// ============================================================================
+
+// Apply API key auth to remaining /api routes
+app.use('/api', apiKeyAuth);
 
 // Send message to specific group (queued)
 // Supports both text and image messages
